@@ -96,7 +96,24 @@ def book_appointment():
         if slot.is_booked:
             return jsonify(msg="Slot already booked."), 409
 
-        # 3. Check for existing appointment (to handle re-booking after cancellation)
+        # 3. Enforce patient-level spacing: ensure this patient has no other
+        # booked appointment within 15 minutes on the same date (any doctor).
+        spacing_minutes = 15
+        requested_dt = datetime.combine(date_obj, time_obj)
+
+        patient_appts = Appointment.query.filter_by(
+            patient_id=patient_id,
+            date=date_obj,
+            status='Booked'
+        ).all()
+
+        for ap in patient_appts:
+            existing_dt = datetime.combine(ap.date, ap.time)
+            delta = abs((existing_dt - requested_dt).total_seconds())
+            if delta < spacing_minutes * 60:
+                return jsonify(msg=f"You have another appointment within {spacing_minutes} minutes."), 409
+
+        # 4. Check for existing appointment for this doctor/time (handle cancelled re-use)
         existing_appt = Appointment.query.filter_by(
             doctor_id=doctor_id,
             date=date_obj,
@@ -107,8 +124,7 @@ def book_appointment():
             if existing_appt.status == 'Cancelled':
                 # Reactivate the appointment
                 existing_appt.status = 'Booked'
-                existing_appt.patient_id = patient_id 
-                # No need to add to session, it's already attached
+                existing_appt.patient_id = patient_id
             else:
                 return jsonify(msg="Slot already booked."), 409
         else:
