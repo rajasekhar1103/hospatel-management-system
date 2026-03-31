@@ -31,9 +31,7 @@ def create_app():
     @app.route('/', defaults={'path': ''})
     @app.route('/<path:path>')
     def serve(path):
-        # NOTE: This only works if you build your Vue app (npm run build) 
-        # and configure Flask to serve the static files from the build directory.
-        # For development, access http://localhost:5173
+        # NOTE: This only works if you build your Vue app (npm run build)
         return app.send_static_file('index.html')
 
     return app

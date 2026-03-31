@@ -1,5 +1,6 @@
 from extensions import db
 from werkzeug.security import generate_password_hash, check_password_hash
+from datetime import datetime
 
 # --- Core User Models ---
 class User(db.Model):
@@ -36,6 +37,7 @@ class DoctorProfile(db.Model):
     # Relationships
     specialization = db.relationship('Specialization', backref='doctors')
     appointments = db.relationship('Appointment', backref='doctor', lazy=True)
+    reviews = db.relationship('Review', backref='doctor', lazy=True, cascade='all, delete-orphan')
 
 class DoctorAvailabilityDay(db.Model):
     """Stores the day the doctor has opened slots."""
@@ -86,6 +88,19 @@ class Treatment(db.Model):
     notes = db.Column(db.String(500))
     # Relationship
     appointment = db.relationship('Appointment', backref='treatment', uselist=False)
+
+# --- Review Model ---
+class Review(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    doctor_id = db.Column(db.Integer, db.ForeignKey('doctor_profile.user_id'), nullable=False)
+    patient_id = db.Column(db.Integer, db.ForeignKey('patient_profile.user_id'), nullable=False)
+    rating = db.Column(db.Integer, nullable=False)  # 1-5 stars
+    comment = db.Column(db.String(500), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    # Relationship
+    patient = db.relationship('PatientProfile', backref='reviews')
+    # Ensure one review per patient per doctor
+    __table_args__ = (db.UniqueConstraint('doctor_id', 'patient_id', name='_doctor_patient_review_uc'),)
 
 
 # --- Initial Admin Creation Function (Called by app.py) ---

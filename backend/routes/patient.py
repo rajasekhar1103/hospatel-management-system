@@ -3,11 +3,12 @@ from flask_jwt_extended import get_jwt_identity
 from datetime import datetime, time, timedelta, date
 from extensions import db, celery 
 # FIXED IMPORTS: Absolute paths
-from models.models import DoctorProfile, Specialization, Appointment, Treatment, DoctorAvailabilityDay, DoctorSlot, PatientProfile, User
+from models.models import DoctorProfile, Specialization, Appointment, Treatment, DoctorAvailabilityDay, DoctorSlot, PatientProfile, User, Review
 from utils.auth_decorators import role_required
 from jobs.tasks import export_treatment_history
 import csv
 from io import StringIO
+from sqlalchemy import func
 
 bp = Blueprint('patient', __name__)
 
@@ -55,11 +56,17 @@ def get_doctors():
         if not available_slots:
             continue
             
+        # Calculate average rating for this doctor
+        avg_rating = db.session.query(func.avg(Review.rating)).filter_by(doctor_id=doc.user_id).scalar()
+        review_count = db.session.query(func.count(Review.id)).filter_by(doctor_id=doc.user_id).scalar()
+        
         result.append({
             'id': doc.user_id,
             'name': doc.full_name,
             'specialization': doc.specialization.name if doc.specialization else 'General',
-            'slots': [slot.time.strftime('%H:%M') for slot in available_slots]
+            'slots': [slot.time.strftime('%H:%M') for slot in available_slots],
+            'rating': round(avg_rating, 1) if avg_rating else None,
+            'review_count': review_count or 0
         })
         
     return jsonify(result), 200
@@ -262,3 +269,107 @@ def cancel_appointment(id):
             
     db.session.commit()
     return jsonify(msg="Appointment cancelled successfully"), 200
+
+# --- Review Endpoints ---
+@bp.route('/doctor/<int:doctor_id>/reviews', methods=['GET'])
+def get_doctor_reviews(doctor_id):
+    """Get all reviews for a specific doctor"""
+    reviews = Review.query.filter_by(doctor_id=doctor_id).order_by(Review.created_at.desc()).all()
+    
+    result = []
+    for review in reviews:
+        result.append({
+            'id': review.id,
+            'rating': review.rating,
+            'comment': review.comment,
+            'patient_name': review.patient.full_name,
+            'created_at': review.created_at.strftime('%Y-%m-%d %H:%M:%S')
+        })
+    
+    return jsonify(result), 200
+
+@bp.route('/doctor/<int:doctor_id>/rating', methods=['GET'])
+def get_doctor_rating(doctor_id):
+    """Get average rating and review count for a doctor"""
+    avg_rating = db.session.query(func.avg(Review.rating)).filter_by(doctor_id=doctor_id).scalar()
+    review_count = db.session.query(func.count(Review.id)).filter_by(doctor_id=doctor_id).scalar()
+    
+    return jsonify({
+        'doctor_id': doctor_id,
+        'average_rating': round(avg_rating, 1) if avg_rating else None,
+        'review_count': review_count or 0,
+        'total_stars': 5
+    }), 200
+
+@bp.route('/review', methods=['POST'])
+@role_required(['Patient'])
+def submit_review():
+    """Submit or update a review for a doctor (patient must have had an appointment with them)"""
+    patient_id = get_jwt_identity()
+    data = request.get_json()
+    
+    doctor_id = data.get('doctor_id')
+    rating = data.get('rating')
+    comment = data.get('comment', '')
+    
+    # Validate rating
+    if not rating or rating < 1 or rating > 5:
+        return jsonify(msg="Rating must be between 1 and 5"), 400
+    
+    if not doctor_id:
+        return jsonify(msg="Doctor ID is required"), 400
+    
+    # Check if patient has completed appointment with this doctor
+    completed_appt = Appointment.query.filter_by(
+        patient_id=patient_id,
+        doctor_id=doctor_id,
+        status='Completed'
+    ).first()
+    
+    if not completed_appt:
+        return jsonify(msg="You can only review doctors you have completed appointments with"), 400
+    
+    # Check if review already exists
+    existing_review = Review.query.filter_by(
+        doctor_id=doctor_id,
+        patient_id=patient_id
+    ).first()
+    
+    if existing_review:
+        # Update existing review
+        existing_review.rating = rating
+        existing_review.comment = comment
+        existing_review.created_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify(msg="Review updated successfully", review_id=existing_review.id), 200
+    else:
+        # Create new review
+        review = Review(
+            doctor_id=doctor_id,
+            patient_id=patient_id,
+            rating=rating,
+            comment=comment
+        )
+        db.session.add(review)
+        db.session.commit()
+        return jsonify(msg="Review submitted successfully", review_id=review.id), 201
+
+@bp.route('/my-reviews', methods=['GET'])
+@role_required(['Patient'])
+def get_my_reviews():
+    """Get reviews submitted by the current patient"""
+    patient_id = get_jwt_identity()
+    reviews = Review.query.filter_by(patient_id=patient_id).order_by(Review.created_at.desc()).all()
+    
+    result = []
+    for review in reviews:
+        result.append({
+            'id': review.id,
+            'doctor_id': review.doctor_id,
+            'doctor_name': review.doctor.full_name,
+            'rating': review.rating,
+            'comment': review.comment,
+            'created_at': review.created_at.strftime('%Y-%m-%d %H:%M:%S')
+        })
+    
+    return jsonify(result), 200
