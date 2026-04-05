@@ -1,10 +1,12 @@
 from flask import Flask, jsonify
+from flask_compress import Compress
 from extensions import db, jwt, redis_client, celery
 from config import Config
 
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
+    Compress(app)
 
     # Initialize extensions with app
     db.init_app(app)

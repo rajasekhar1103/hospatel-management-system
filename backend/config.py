@@ -6,6 +6,11 @@ class Config:
     # SQLite Setup
     SQLALCHEMY_DATABASE_URI = 'sqlite:///hospital_management.db'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_size': 10,
+        'pool_recycle': 3600,
+        'pool_pre_ping': True,
+    }
     
     # JWT Settings (Example)
     JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY') or 'jwt-super-secret'
