@@ -1,7 +1,9 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request, g
 from flask_compress import Compress
 from extensions import db, jwt, redis_client, celery
 from config import Config
+import time
+import uuid
 
 def create_app():
     app = Flask(__name__)
@@ -13,6 +15,25 @@ def create_app():
     jwt.init_app(app)
     redis_client.init_app(app)
     celery.conf.update(app.config)
+    
+    # Track request timing
+    @app.before_request
+    def before_request():
+        g.start_time = time.time()
+        g.request_id = str(uuid.uuid4())[:8]
+    
+    @app.after_request
+    def after_request(response):
+        if hasattr(g, 'start_time'):
+            elapsed = time.time() - g.start_time
+            response.headers['X-Response-Time'] = f"{elapsed:.3f}s"
+            response.headers['X-Request-ID'] = g.request_id
+        return response
+    
+    # Health check endpoint
+    @app.route('/api/health', methods=['GET'])
+    def health_check():
+        return jsonify({'status': 'healthy', 'timestamp': time.time()}), 200
 
     # Register blueprints (routes) using absolute imports
     from routes import auth, admin, doctor, patient
