@@ -5,13 +5,17 @@ from datetime import date, timedelta
 from models.models import Appointment, Treatment, DoctorProfile, User, PatientProfile
 from io import StringIO
 import csv
+from sqlalchemy.orm import joinedload
 
 # Scheduled Job - Daily reminders (Celery Beat)
 @celery.task
 def send_daily_reminders():
     today = date.today()
-    # Find all appointments for today that are 'Booked'
-    appointments = Appointment.query.filter(
+    # Optimized: Use eager loading to prevent N+1 queries
+    appointments = Appointment.query.options(
+        joinedload(Appointment.patient).joinedload(PatientProfile.user),
+        joinedload(Appointment.doctor)
+    ).filter(
         Appointment.date == today,
         Appointment.status == 'Booked'
     ).all()
@@ -22,7 +26,7 @@ def send_daily_reminders():
         print(f"Reminder sent to {patient.username} via Mail/Chat: Appointment today at {appt.time} with Doctor ID {appt.doctor_id}.")
         # Implementation detail: Use Google Chat Webhooks/Mail library here
 
-# Scheduled Job - Monthly Activity Report (Celery Beat)
+# Scheduled Job - Monthly Activity Report (Celery Beat) - Optimized batch processing
 @celery.task
 def generate_monthly_report():
     first_day_of_month = date.today().replace(day=1)

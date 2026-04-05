@@ -5,6 +5,7 @@ from extensions import db, celery
 # FIXED IMPORTS: Absolute paths
 from models.models import DoctorProfile, Specialization, Appointment, Treatment, DoctorAvailabilityDay, DoctorSlot, PatientProfile, User, Review
 from utils.auth_decorators import role_required
+from utils.cache import cached, pagination_params, paginate_query, paginate_response
 from jobs.tasks import export_treatment_history
 import csv
 from io import StringIO
@@ -13,6 +14,7 @@ from sqlalchemy import func
 bp = Blueprint('patient', __name__)
 
 @bp.route('/specializations', methods=['GET'])
+@cached(timeout=3600)  # Cache for 1 hour - specializations rarely change
 def get_specializations():
     specs = Specialization.query.all()
     result = [{'id': s.id, 'name': s.name} for s in specs]
@@ -23,6 +25,7 @@ def get_specializations():
 def get_doctors():
     spec_id = request.args.get('spec_id', type=int)
     date_str = request.args.get('date') # YYYY-MM-DD
+    page, per_page = pagination_params()  # Add pagination
     
     if not date_str:
         return jsonify(msg="Date parameter is required"), 400
@@ -32,11 +35,11 @@ def get_doctors():
     except ValueError:
         return jsonify(msg="Invalid date format"), 400
 
-    query = DoctorProfile.query
+    query = DoctorProfile.query.options(__import__('sqlalchemy.orm').joinedload(DoctorProfile.user))
     if spec_id:
         query = query.filter_by(specialization_id=spec_id)
         
-    doctors = query.all()
+    doctors, total, total_pages = paginate_query(query, page, per_page)
     
     result = []
     
