@@ -17,11 +17,15 @@
 
                 <div class="mb-3">
                     <label for="doctor-select" class="form-label">Select Doctor</label>
+                    <div v-if="loadingDoctors" class="form-text text-muted">Loading completed doctors...</div>
+                    <div v-else-if="completedDoctors.length === 0" class="alert alert-info py-2">
+                        No completed appointments found. Complete an appointment before leaving a review.
+                    </div>
                     <select 
+                        v-else
                         id="doctor-select"
                         v-model="selectedDoctorId" 
                         class="form-select"
-                        @change="loadDoctorInfo"
                     >
                         <option value="">Choose a doctor...</option>
                         <option v-for="doctor in completedDoctors" :key="doctor.id" :value="doctor.id">
@@ -112,6 +116,7 @@ export default {
             isSubmitting: false,
             successMessage: '',
             errorMessage: '',
+            loadingDoctors: true,
             completedDoctors: [],
             reviews: []
         };
@@ -144,6 +149,8 @@ export default {
                 this.completedDoctors = Array.from(doctorMap.values());
             } catch (error) {
                 console.error('Error loading completed doctors:', error);
+            } finally {
+                this.loadingDoctors = false;
             }
         },
         async loadMyReviews() {
