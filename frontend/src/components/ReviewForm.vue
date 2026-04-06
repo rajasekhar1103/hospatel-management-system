@@ -133,9 +133,9 @@ export default {
                 // Get unique doctors from completed appointments
                 const doctorMap = new Map();
                 data.forEach(appt => {
-                    if (appt.status === 'Completed' && !doctorMap.has(appt.doctor_name)) {
-                        doctorMap.set(appt.doctor_name, {
-                            id: appt.id, // This needs to be doctor_id ideally
+                    if (appt.status === 'Completed' && appt.doctor_id && !doctorMap.has(appt.doctor_id)) {
+                        doctorMap.set(appt.doctor_id, {
+                            id: appt.doctor_id,
                             doctor_name: appt.doctor_name,
                             specialization: appt.specialization
                         });

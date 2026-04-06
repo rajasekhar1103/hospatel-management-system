@@ -10,6 +10,7 @@ from jobs.tasks import export_treatment_history
 import csv
 from io import StringIO
 from sqlalchemy import func
+from sqlalchemy.orm import joinedload
 
 bp = Blueprint('patient', __name__)
 
@@ -35,10 +36,9 @@ def get_doctors():
     except ValueError:
         return jsonify(msg="Invalid date format"), 400
 
-    query = DoctorProfile.query.options(__import__('sqlalchemy.orm').joinedload(DoctorProfile.user))
+    query = DoctorProfile.query.options(joinedload(DoctorProfile.user))
     if spec_id:
         query = query.filter_by(specialization_id=spec_id)
-        
     doctors, total, total_pages = paginate_query(query, page, per_page)
     
     result = []
@@ -183,6 +183,7 @@ def get_patient_history():
     for appt, doc, treatment in appointments:
         item = {
             'id': appt.id,
+            'doctor_id': doc.user_id,
             'date': str(appt.date),
             'time': str(appt.time),
             'doctor_name': doc.full_name,
