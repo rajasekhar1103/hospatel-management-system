@@ -9,7 +9,7 @@ from utils.cache import cached, pagination_params, paginate_query, paginate_resp
 from jobs.tasks import export_treatment_history
 import csv
 from io import StringIO
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload
 
 bp = Blueprint('patient', __name__)
@@ -36,9 +36,19 @@ def get_doctors():
     except ValueError:
         return jsonify(msg="Invalid date format"), 400
 
+    search_query = request.args.get('query', '', type=str).strip()
+
     query = DoctorProfile.query.options(joinedload(DoctorProfile.user))
     if spec_id:
         query = query.filter_by(specialization_id=spec_id)
+    if search_query:
+        query = query.outerjoin(Specialization).filter(
+            or_(
+                DoctorProfile.full_name.ilike(f'%{search_query}%'),
+                Specialization.name.ilike(f'%{search_query}%'),
+                DoctorProfile.bio.ilike(f'%{search_query}%')
+            )
+        )
     doctors, total, total_pages = paginate_query(query, page, per_page)
     
     result = []

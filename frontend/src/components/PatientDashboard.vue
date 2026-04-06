@@ -39,19 +39,23 @@
                             <h4 class="mb-4 fw-bold text-primary">Find a Doctor</h4>
                             
                             <div class="row g-3 mb-4">
-                                <div class="col-md-5">
+                                <div class="col-md-4">
                                     <label class="form-label text-muted small fw-bold">SPECIALIZATION</label>
                                     <select class="form-select border-0 bg-light shadow-sm" v-model="selectedSpecialization" @change="fetchDoctors">
                                         <option value="">Select Specialization...</option>
                                         <option v-for="spec in specializations" :key="spec.id" :value="spec.id">{{ spec.name }}</option>
                                     </select>
                                 </div>
-                                <div class="col-md-5">
+                                <div class="col-md-4">
+                                    <label class="form-label text-muted small fw-bold">SEARCH</label>
+                                    <input type="text" class="form-control border-0 bg-light shadow-sm" v-model="doctorSearchQuery" @keyup.enter="fetchDoctors" placeholder="Doctor name or specialization">
+                                </div>
+                                <div class="col-md-3">
                                     <label class="form-label text-muted small fw-bold">DATE</label>
                                     <input type="date" class="form-control border-0 bg-light shadow-sm" v-model="selectedDate" @change="fetchDoctors">
                                 </div>
-                                <div class="col-md-2 d-flex align-items-end">
-                                    <button class="btn btn-primary w-100 shadow-sm" @click="fetchDoctors">Search</button>
+                                <div class="col-md-1 d-flex align-items-end">
+                                    <button class="btn btn-primary w-100 shadow-sm" @click="fetchDoctors">Go</button>
                                 </div>
                             </div>
 
@@ -187,6 +191,7 @@ export default {
         return {
             specializations: [],
             selectedSpecialization: '',
+            doctorSearchQuery: '',
             selectedDate: new Date().toISOString().slice(0, 10),
             availableDoctors: [],
             hasSearched: false,
@@ -240,6 +245,7 @@ export default {
             
             let url = `/api/patient/doctors?date=${this.selectedDate}`;
             if (this.selectedSpecialization) url += `&spec_id=${this.selectedSpecialization}`;
+            if (this.doctorSearchQuery) url += `&query=${encodeURIComponent(this.doctorSearchQuery)}`;
             
             try {
                 const response = await fetch(url, { headers: { 'Authorization': `Bearer ${getToken()}` } });
