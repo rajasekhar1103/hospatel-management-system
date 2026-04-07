@@ -1,10 +1,17 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 from flask_jwt_extended import get_jwt_identity
 from datetime import date, datetime, timedelta
+from werkzeug.utils import secure_filename
 from extensions import db
 # FIXED IMPORTS: Absolute paths
-from models.models import Appointment, Treatment, DoctorAvailabilityDay, DoctorSlot, PatientProfile, User, DoctorProfile
+from models.models import Appointment, Treatment, DoctorAvailabilityDay, DoctorSlot, PatientProfile, User, DoctorProfile, Specialization
 from utils.auth_decorators import role_required
+import os
+
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 bp = Blueprint('doctor', __name__)
 
@@ -105,6 +112,65 @@ def get_my_patients():
     
     result = [{'id': p.user_id, 'name': p.full_name} for p in patients]
     return jsonify(result), 200
+
+@bp.route('/profile', methods=['GET'])
+@role_required(['Doctor'])
+def get_profile():
+    doctor_id = get_jwt_identity()
+    doctor = DoctorProfile.query.get_or_404(doctor_id)
+    return jsonify({
+        'full_name': doctor.full_name,
+        'specialization': doctor.specialization.name if doctor.specialization else '',
+        'contact_info': doctor.contact_info,
+        'experience_years': doctor.experience_years,
+        'bio': doctor.bio,
+        'photo_url': doctor.photo_url or ''
+    }), 200
+
+@bp.route('/profile', methods=['PUT'])
+@role_required(['Doctor'])
+def update_profile():
+    doctor_id = get_jwt_identity()
+    doctor = DoctorProfile.query.get_or_404(doctor_id)
+
+    full_name = request.form.get('full_name')
+    specialization_name = request.form.get('specialization')
+    contact_info = request.form.get('contact_info')
+    experience_years = request.form.get('experience_years')
+    bio = request.form.get('bio')
+
+    if full_name:
+        doctor.full_name = full_name
+    if contact_info is not None:
+        doctor.contact_info = contact_info
+    if experience_years is not None and experience_years != '':
+        try:
+            doctor.experience_years = int(experience_years)
+        except ValueError:
+            pass
+    if bio is not None:
+        doctor.bio = bio
+
+    if specialization_name:
+        specialization = Specialization.query.filter_by(name=specialization_name).first()
+        if not specialization:
+            specialization = Specialization(name=specialization_name)
+            db.session.add(specialization)
+            db.session.flush()
+        doctor.specialization = specialization
+
+    if 'photo' in request.files:
+        photo = request.files['photo']
+        if photo and allowed_file(photo.filename):
+            filename = f"doctor_{doctor_id}_{secure_filename(photo.filename)}"
+            upload_folder = current_app.config.get('UPLOAD_FOLDER')
+            os.makedirs(upload_folder, exist_ok=True)
+            save_path = os.path.join(upload_folder, filename)
+            photo.save(save_path)
+            doctor.photo_url = f"/static/uploads/{filename}"
+
+    db.session.commit()
+    return jsonify(msg='Profile updated successfully', photo_url=doctor.photo_url), 200
 
 @bp.route('/availability', methods=['GET'])
 @role_required(['Doctor'])

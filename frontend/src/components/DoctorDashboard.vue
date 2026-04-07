@@ -19,6 +19,9 @@
                         <button class="nav-link mb-2 text-start fw-medium" id="patients-tab" data-bs-toggle="pill" data-bs-target="#patients" type="button" role="tab">
                             👥 My Patients
                         </button>
+                        <button class="nav-link mb-2 text-start fw-medium" id="profile-tab" data-bs-toggle="pill" data-bs-target="#profile" type="button" role="tab">
+                            📝 Profile
+                        </button>
                         <button class="nav-link mb-2 text-start fw-medium" id="availability-tab" data-bs-toggle="pill" data-bs-target="#availability" type="button" role="tab" @click="fetchAvailability">
                             ⏰ Availability
                         </button>
@@ -83,6 +86,52 @@
                             <div v-else class="text-center py-5 text-muted">
                                 <p>No patients assigned yet.</p>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- Profile Tab -->
+                    <div class="tab-pane fade" id="profile" role="tabpanel">
+                        <div class="glass-panel p-4">
+                            <h4 class="mb-4 fw-bold text-primary">Doctor Profile</h4>
+                            <form @submit.prevent="saveProfile">
+                                <div class="row g-3">
+                                    <div class="col-md-4 text-center">
+                                        <div class="profile-image-wrapper mb-3">
+                                            <img v-if="doctorProfile.photo_url" :src="doctorProfile.photo_url" alt="Doctor Photo" class="img-fluid rounded-circle doctor-photo" />
+                                            <div v-else class="avatar-circle bg-success text-white d-flex align-items-center justify-content-center mx-auto mb-3">
+                                                D
+                                            </div>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label small fw-semibold">Upload Photo</label>
+                                            <input class="form-control form-control-sm" type="file" @change="handlePhotoChange" accept="image/*" />
+                                        </div>
+                                    </div>
+                                    <div class="col-md-8">
+                                        <div class="mb-3">
+                                            <label class="form-label small fw-semibold">Full Name</label>
+                                            <input class="form-control" type="text" v-model="doctorProfile.full_name" required />
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label small fw-semibold">Specialization</label>
+                                            <input class="form-control" type="text" v-model="doctorProfile.specialization" placeholder="e.g. General Practitioner" />
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label small fw-semibold">Contact Info</label>
+                                            <input class="form-control" type="text" v-model="doctorProfile.contact_info" placeholder="Phone or email" />
+                                        </div>
+                                        <div class="mb-3">
+                                            <label class="form-label small fw-semibold">Experience (years)</label>
+                                            <input class="form-control" type="number" min="0" v-model.number="doctorProfile.experience_years" />
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label small fw-semibold">Bio</label>
+                                    <textarea class="form-control" rows="4" v-model="doctorProfile.bio" placeholder="Write a short doctor profile..."></textarea>
+                                </div>
+                                <button type="submit" class="btn btn-success px-4 fw-bold">Save Profile</button>
+                            </form>
                         </div>
                     </div>
 
@@ -221,6 +270,15 @@ export default {
         return {
             upcomingAppointments: [],
             assignedPatients: [],
+            doctorProfile: {
+                full_name: '',
+                specialization: '',
+                contact_info: '',
+                experience_years: 0,
+                bio: '',
+                photo_url: ''
+            },
+            profilePhotoFile: null,
             
             // Availability Data
             selectedDate: '',
@@ -242,6 +300,7 @@ export default {
     mounted() {
         this.fetchSchedule();
         this.fetchPatients();
+        this.fetchProfile();
         if (window.bootstrap && window.bootstrap.Modal) {
              this.treatmentModalInstance = new window.bootstrap.Modal(this.$refs.treatmentModal);
              this.historyModalInstance = new window.bootstrap.Modal(this.$refs.historyModal);
@@ -268,6 +327,46 @@ export default {
             try {
                 const response = await fetch('/api/doctor/patients', { headers: { 'Authorization': `Bearer ${getToken()}` } });
                 if (response.ok) this.assignedPatients = await response.json();
+            } catch (e) { console.error(e); }
+        },
+        async fetchProfile() {
+            try {
+                const response = await fetch('/api/doctor/profile', { headers: { 'Authorization': `Bearer ${getToken()}` } });
+                if (response.ok) {
+                    this.doctorProfile = await response.json();
+                }
+            } catch (e) { console.error(e); }
+        },
+        handlePhotoChange(event) {
+            const file = event.target.files[0];
+            if (file) {
+                this.profilePhotoFile = file;
+            }
+        },
+        async saveProfile() {
+            const formData = new FormData();
+            formData.append('full_name', this.doctorProfile.full_name || '');
+            formData.append('specialization', this.doctorProfile.specialization || '');
+            formData.append('contact_info', this.doctorProfile.contact_info || '');
+            formData.append('experience_years', this.doctorProfile.experience_years || '0');
+            formData.append('bio', this.doctorProfile.bio || '');
+            if (this.profilePhotoFile) {
+                formData.append('photo', this.profilePhotoFile);
+            }
+
+            try {
+                const response = await fetch('/api/doctor/profile', {
+                    method: 'PUT',
+                    headers: { 'Authorization': `Bearer ${getToken()}` },
+                    body: formData
+                });
+                if (response.ok) {
+                    const result = await response.json();
+                    this.doctorProfile.photo_url = result.photo_url || this.doctorProfile.photo_url;
+                    alert('Profile saved successfully!');
+                } else {
+                    alert('Failed to save profile.');
+                }
             } catch (e) { console.error(e); }
         },
         
@@ -405,4 +504,21 @@ export default {
     transform: translateY(-3px);
     box-shadow: var(--shadow-lg) !important;
 }
+.doctor-photo {
+    width: 120px;
+    height: 120px;
+    object-fit: cover;
+    border-radius: 50%;
+    border: 3px solid #198754;
+}
+.profile-image-wrapper {
+    display: inline-block;
+}
+.avatar-circle {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    font-size: 2rem;
+}
+
 </style>

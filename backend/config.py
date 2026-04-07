@@ -12,6 +12,11 @@ class Config:
         'pool_pre_ping': True,
     }
     
+    # File upload settings
+    BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+    UPLOAD_FOLDER = os.path.join(BASE_DIR, 'static', 'uploads')
+    MAX_CONTENT_LENGTH = 2 * 1024 * 1024
+
     # JWT Settings (Example)
     JWT_SECRET_KEY = os.environ.get('JWT_SECRET_KEY') or 'jwt-super-secret'
 

@@ -33,6 +33,7 @@ class DoctorProfile(db.Model):
     contact_info = db.Column(db.String(100))
     experience_years = db.Column(db.Integer, default=0)
     bio = db.Column(db.String(500)) # FIX: Added 'bio' column
+    photo_url = db.Column(db.String(200))
     
     # Relationships
     specialization = db.relationship('Specialization', backref='doctors')

@@ -4,6 +4,7 @@ from extensions import db, jwt, redis_client, celery
 from config import Config
 import time
 import uuid
+import os
 
 def create_app():
     app = Flask(__name__)
@@ -43,9 +44,20 @@ def create_app():
     app.register_blueprint(doctor.bp, url_prefix='/api/doctor')
     app.register_blueprint(patient.bp, url_prefix='/api/patient')
     
-    # Setup initial admin user and database creation
+    # Setup static upload folder and database
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
     with app.app_context():
         db.create_all()
+        # Ensure the new doctor photo URL column exists for existing databases
+        try:
+            result = db.engine.execute("PRAGMA table_info(doctor_profile);")
+            columns = [row[1] for row in result]
+            if 'photo_url' not in columns:
+                db.engine.execute("ALTER TABLE doctor_profile ADD COLUMN photo_url VARCHAR(200)")
+        except Exception:
+            pass
+
         # Use absolute import for model functions
         from models.models import create_initial_admin
         create_initial_admin(db)
