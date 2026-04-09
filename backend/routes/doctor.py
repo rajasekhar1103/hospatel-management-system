@@ -233,6 +233,32 @@ def set_availability():
     db.session.commit()
     return jsonify(msg="Availability updated successfully"), 200
 
+@bp.route('/availability/<date_str>', methods=['DELETE'])
+@role_required(['Doctor'])
+def delete_availability(date_str):
+    doctor_id = get_jwt_identity()
+    
+    try:
+        date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
+    except ValueError:
+        return jsonify(msg="Invalid date format"), 400
+    
+    # Find the availability day
+    day_avail = DoctorAvailabilityDay.query.filter_by(doctor_id=doctor_id, date=date_obj).first()
+    if not day_avail:
+        return jsonify(msg="No availability found for this date"), 404
+    
+    # Check if any slots are booked
+    booked_slots = DoctorSlot.query.filter_by(availability_day_id=day_avail.id, is_booked=True).count()
+    if booked_slots > 0:
+        return jsonify(msg="Cannot delete availability with booked appointments"), 400
+    
+    # Delete the day (cascade will delete slots)
+    db.session.delete(day_avail)
+    db.session.commit()
+    
+    return jsonify(msg="Availability deleted successfully"), 200
+
 @bp.route('/patient/<int:patient_id>/history', methods=['GET'])
 @role_required(['Doctor'])
 def get_patient_history(patient_id):
