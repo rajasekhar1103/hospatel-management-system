@@ -4,7 +4,7 @@ from datetime import date, datetime, timedelta
 from werkzeug.utils import secure_filename
 from extensions import db
 # FIXED IMPORTS: Absolute paths
-from models.models import Appointment, Treatment, DoctorAvailabilityDay, DoctorSlot, PatientProfile, User, DoctorProfile, Specialization
+from models.models import Appointment, Treatment, DoctorAvailabilityDay, DoctorSlot, PatientProfile, User, DoctorProfile, Specialization, Review
 from utils.auth_decorators import role_required
 import os
 
@@ -261,4 +261,22 @@ def get_patient_history(patient_id):
         }
         result.append(item)
         
+    return jsonify(result), 200
+
+@bp.route('/reviews', methods=['GET'])
+@role_required(['Doctor'])
+def get_my_reviews():
+    doctor_id = get_jwt_identity()
+    reviews = Review.query.filter_by(doctor_id=doctor_id).order_by(Review.created_at.desc()).all()
+    
+    result = []
+    for review in reviews:
+        result.append({
+            'id': review.id,
+            'rating': review.rating,
+            'comment': review.comment,
+            'patient_name': review.patient.full_name,
+            'created_at': review.created_at.strftime('%Y-%m-%d %H:%M:%S')
+        })
+    
     return jsonify(result), 200
