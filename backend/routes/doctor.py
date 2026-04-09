@@ -7,6 +7,7 @@ from extensions import db
 from models.models import Appointment, Treatment, DoctorAvailabilityDay, DoctorSlot, PatientProfile, User, DoctorProfile, Specialization, Review
 from utils.auth_decorators import role_required
 import os
+from sqlalchemy import func
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 
@@ -262,6 +263,43 @@ def get_patient_history(patient_id):
         result.append(item)
         
     return jsonify(result), 200
+
+@bp.route('/statistics', methods=['GET'])
+@role_required(['Doctor'])
+def get_statistics():
+    doctor_id = get_jwt_identity()
+    
+    # Total appointments
+    total_appointments = Appointment.query.filter_by(doctor_id=doctor_id).count()
+    
+    # Completed appointments
+    completed_appointments = Appointment.query.filter_by(doctor_id=doctor_id, status='Completed').count()
+    
+    # Upcoming appointments
+    today = date.today()
+    upcoming_appointments = Appointment.query.filter(
+        Appointment.doctor_id == doctor_id,
+        Appointment.date >= today,
+        Appointment.status == 'Booked'
+    ).count()
+    
+    # Unique patients
+    unique_patients = db.session.query(func.count(func.distinct(Appointment.patient_id))).filter_by(doctor_id=doctor_id).scalar()
+    
+    # Average rating
+    avg_rating = db.session.query(func.avg(Review.rating)).filter_by(doctor_id=doctor_id).scalar()
+    
+    # Review count
+    review_count = Review.query.filter_by(doctor_id=doctor_id).count()
+    
+    return jsonify({
+        'total_appointments': total_appointments,
+        'completed_appointments': completed_appointments,
+        'upcoming_appointments': upcoming_appointments,
+        'unique_patients': unique_patients,
+        'average_rating': round(avg_rating, 1) if avg_rating else None,
+        'review_count': review_count
+    }), 200
 
 @bp.route('/reviews', methods=['GET'])
 @role_required(['Doctor'])
