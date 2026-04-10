@@ -2,66 +2,120 @@ from flask import Blueprint, request, jsonify
 from extensions import db
 from models.models import User, DoctorProfile, Specialization, Appointment, PatientProfile
 from utils.auth_decorators import role_required
+from utils.validators import sanitize_string, validate_integer
+import logging
+
+logger = logging.getLogger(__name__)
 
 bp = Blueprint('admin', __name__)
 
 @bp.route('/stats', methods=['GET'])
 @role_required(['Admin'])
 def get_stats():
-    stats = {
-        'total_doctors': DoctorProfile.query.count(),
-        'total_patients': PatientProfile.query.count(),
-        'upcoming_appointments': Appointment.query.filter_by(status='Booked').count()
-    }
-    return jsonify(stats), 200
+    """
+    Get dashboard statistics for admin
+    
+    Returns:
+        - 200: {total_doctors, total_patients, upcoming_appointments}
+    """
+    try:
+        stats = {
+            'total_doctors': DoctorProfile.query.count(),
+            'total_patients': PatientProfile.query.count(),
+            'upcoming_appointments': Appointment.query.filter_by(status='Booked').count()
+        }
+        logger.info("Admin stats requested")
+        return jsonify(stats), 200
+    except Exception as e:
+        logger.error(f"Stats error: {str(e)}")
+        return jsonify(msg="Could not fetch statistics"), 500
 
 # --- BLOCK/UNBLOCK (Blacklist) Endpoint: Used for Doctors and Patients ---
 @bp.route('/users/<int:user_id>/blacklist', methods=['PUT'])
 @role_required(['Admin'])
 def blacklist_user(user_id):
-    user = User.query.get_or_404(user_id)
-    if user.role == 'Admin':
-        return jsonify(msg="Cannot blacklist Admin"), 400
+    """
+    Activate or deactivate user account
     
-    # Toggle active status (True -> False, or False -> True)
-    user.is_active = not user.is_active
-    db.session.commit()
-    status = "activated" if user.is_active else "blacklisted"
-    return jsonify(msg=f"User {user.username} {status} successfully"), 200
+    Returns:
+        - 200: User status updated
+        - 400: Cannot blacklist admin
+        - 404: User not found
+    """
+    try:
+        user = User.query.get_or_404(user_id)
+        if user.role == 'Admin':
+            logger.warning(f"Admin attempted to blacklist another admin: user_id={user_id}")
+            return jsonify(msg="Cannot blacklist Admin"), 400
+        
+        # Toggle active status (True -> False, or False -> True)
+        user.is_active = not user.is_active
+        db.session.commit()
+        
+        status = "activated" if user.is_active else "blacklisted"
+        logger.info(f"User {user.username} {status} by admin")
+        return jsonify(msg=f"User {user.username} {status} successfully"), 200
+    except Exception as e:
+        logger.error(f"Blacklist error: {str(e)}")
+        return jsonify(msg="Operation failed"), 500
 
 @bp.route('/search', methods=['GET'])
 @role_required(['Admin'])
 def search_users():
-    query = request.args.get('query', '')
-    results = []
+    """
+    Search for users by username or name
     
-    # Search Patients
-    patients = db.session.query(User, PatientProfile).join(PatientProfile).filter(
-        (User.username.contains(query)) | (PatientProfile.full_name.contains(query))
-    ).all()
+    Query params:
+        query: Search term
     
-    for u, p in patients:
-        results.append({'id': u.id, 'username': u.username, 'full_name': p.full_name, 'role': 'Patient', 'is_active': u.is_active, 'contact_info': p.contact_info})
+    Returns:
+        - 200: List of matching users
+    """
+    try:
+        query = sanitize_string(request.args.get('query', ''))
+        if not query or len(query) < 2:
+            return jsonify(msg="Search query must be at least 2 characters"), 400
+        
+        results = []
+        
+        # Search Patients
+        patients = db.session.query(User, PatientProfile).join(PatientProfile).filter(
+            (User.username.ilike(f'%{query}%')) | (PatientProfile.full_name.ilike(f'%{query}%'))
+        ).all()
+        
+        for u, p in patients:
+            results.append({
+                'id': u.id,
+                'username': u.username,
+                'full_name': p.full_name,
+                'role': 'Patient',
+                'is_active': u.is_active,
+                'contact_info': p.contact_info
+            })
 
-    # Search Doctors
-    doctors = db.session.query(User, DoctorProfile).join(DoctorProfile).filter(
-        (User.username.contains(query)) | (DoctorProfile.full_name.contains(query))
-    ).all()
+        # Search Doctors
+        doctors = db.session.query(User, DoctorProfile).join(DoctorProfile).filter(
+            (User.username.ilike(f'%{query}%')) | (DoctorProfile.full_name.ilike(f'%{query}%'))
+        ).all()
 
-    for u, d in doctors:
-        spec_name = d.specialization.name if d.specialization else 'N/A'
-        results.append({
-            'id': u.id, 
-            'username': u.username, 
-            'full_name': d.full_name, 
-            'role': 'Doctor', 
-            'is_active': u.is_active, 
-            'specialization': spec_name, 
-            'contact_info': d.contact_info, 
-            'bio': d.bio
-        })
+        for u, d in doctors:
+            spec_name = d.specialization.name if d.specialization else 'N/A'
+            results.append({
+                'id': u.id,
+                'username': u.username,
+                'full_name': d.full_name,
+                'role': 'Doctor',
+                'is_active': u.is_active,
+                'specialization': spec_name,
+                'contact_info': d.contact_info,
+                'bio': d.bio
+            })
 
-    return jsonify(results), 200
+        logger.info(f"User search performed: query='{query}', results={len(results)}")
+        return jsonify(results), 200
+    except Exception as e:
+        logger.error(f"Search error: {str(e)}")
+        return jsonify(msg="Search failed"), 500
 
 # --- ADMIN CRUD: ADD/UPDATE DOCTOR PROFILE ---
 # Note: Admin CANNOT add other user types (Patients register themselves).
@@ -69,34 +123,72 @@ def search_users():
 @bp.route('/doctors', methods=['POST'])
 @role_required(['Admin'])
 def add_doctor():
-    data = request.get_json()
+    """
+    Create new doctor account
     
-    if User.query.filter_by(username=data['username']).first():
-        return jsonify(msg="Username already exists"), 400
-
-    user = User(username=data['username'], role='Doctor')
-    user.set_password(data['password'])
+    Expected JSON:
+        {
+            "username": "doctor@hospital.com",
+            "password": "secure_password",
+            "full_name": "Dr. John Smith",
+            "specialization": "Cardiology",
+            "contact_info": "1234567890",
+            "bio": "Experienced cardiologist..."
+        }
     
-    spec_name = data.get('specialization')
-    if not spec_name:
-        return jsonify(msg="Specialization is required"), 400
+    Returns:
+        - 201: Doctor created successfully
+        - 400: Validation failed or username exists
+        - 500: Database error
+    """
+    try:
+        data = request.get_json()
         
-    spec = Specialization.query.filter_by(name=spec_name).first()
-    if not spec:
-        spec = Specialization(name=spec_name)
-        db.session.add(spec)
-        db.session.flush()
+        # Validate required fields
+        required_fields = ['username', 'password', 'full_name', 'specialization']
+        missing = [f for f in required_fields if not data.get(f)]
+        if missing:
+            return jsonify(msg=f"Missing required fields: {', '.join(missing)}"), 400
 
-    doctor_profile = DoctorProfile(
-        user=user,
-        full_name=data['full_name'],
-        specialization=spec,
-        contact_info=data.get('contact_info'),
-        bio=data.get('bio')
-    )
+        username = sanitize_string(data['username'], max_length=80)
+        if not username:
+            return jsonify(msg="Invalid username"), 400
+        
+        if User.query.filter_by(username=username).first():
+            logger.warning(f"Attempt to create doctor with existing username: {username}")
+            return jsonify(msg="Username already exists"), 400
 
-    db.session.add_all([user, doctor_profile])
-    db.session.commit()
+        user = User(username=username, role='Doctor')
+        user.set_password(data['password'])
+        
+        spec_name = sanitize_string(data.get('specialization'), max_length=50)
+        if not spec_name:
+            return jsonify(msg="Specialization is required and must be valid"), 400
+            
+        spec = Specialization.query.filter_by(name=spec_name).first()
+        if not spec:
+            spec = Specialization(name=spec_name)
+            db.session.add(spec)
+            db.session.flush()
+
+        doctor_profile = DoctorProfile(
+            user=user,
+            full_name=sanitize_string(data['full_name'], max_length=100),
+            specialization=spec,
+            contact_info=sanitize_string(data.get('contact_info', ''), max_length=100),
+            bio=sanitize_string(data.get('bio', ''), max_length=500)
+        )
+
+        db.session.add_all([user, doctor_profile])
+        db.session.commit()
+        
+        logger.info(f"New doctor created: {username}")
+        return jsonify(msg="Doctor created successfully", doctor_id=user.id), 201
+    
+    except Exception as e:
+        logger.error(f"Doctor creation error: {str(e)}")
+        db.session.rollback()
+        return jsonify(msg="Doctor creation failed"), 500
 
     return jsonify(msg="Doctor added successfully"), 201
 
