@@ -6,8 +6,12 @@ from extensions import db
 # FIXED IMPORTS: Absolute paths
 from models.models import Appointment, Treatment, DoctorAvailabilityDay, DoctorSlot, PatientProfile, User, DoctorProfile, Specialization, Review
 from utils.auth_decorators import role_required
+from utils.validators import validate_integer, sanitize_string, validate_date_format, validate_time_format
 import os
 from sqlalchemy import func
+import logging
+
+logger = logging.getLogger(__name__)
 
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
 

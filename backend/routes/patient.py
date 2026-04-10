@@ -6,12 +6,16 @@ from extensions import db, celery
 from models.models import DoctorProfile, Specialization, Appointment, Treatment, DoctorAvailabilityDay, DoctorSlot, PatientProfile, User, Review
 from utils.auth_decorators import role_required
 from utils.cache import cached, pagination_params, paginate_query, paginate_response
+from utils.query_helpers import get_doctors_with_ratings, check_appointment_conflict
+from utils.validators import validate_date_format, validate_time_format
 from jobs.tasks import export_treatment_history
 import csv
 from io import StringIO
 from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload
+import logging
 
+logger = logging.getLogger(__name__)
 bp = Blueprint('patient', __name__)
 
 @bp.route('/specializations', methods=['GET'])
@@ -24,6 +28,7 @@ def get_specializations():
 @bp.route('/doctors', methods=['GET'])
 @role_required(['Patient'])
 def get_doctors():
+    """Get available doctors with pagination and filtering"""
     spec_id = request.args.get('spec_id', type=int)
     date_str = request.args.get('date') # YYYY-MM-DD
     page, per_page = pagination_params()  # Add pagination
@@ -31,10 +36,9 @@ def get_doctors():
     if not date_str:
         return jsonify(msg="Date parameter is required"), 400
 
-    try:
-        date_obj = datetime.strptime(date_str, '%Y-%m-%d').date()
-    except ValueError:
-        return jsonify(msg="Invalid date format"), 400
+    date_obj, error = validate_date_format(date_str)
+    if error:
+        return jsonify(msg=error), 400
 
     search_query = request.args.get('query', '', type=str).strip()
 
@@ -51,8 +55,11 @@ def get_doctors():
         )
     doctors, total, total_pages = paginate_query(query, page, per_page)
     
-    result = []
+    # Get rating stats for all doctors in one optimized query (fixes N+1 problem)
+    doctor_ids = [doc.user_id for doc in doctors]
+    rating_stats = get_doctors_with_ratings(doctor_ids, db)
     
+    result = []
     for doc in doctors:
         # Find availability for this day
         day_avail = DoctorAvailabilityDay.query.filter_by(doctor_id=doc.user_id, date=date_obj).first()
@@ -68,18 +75,17 @@ def get_doctors():
         
         if not available_slots:
             continue
-            
-        # Calculate average rating for this doctor
-        avg_rating = db.session.query(func.avg(Review.rating)).filter_by(doctor_id=doc.user_id).scalar()
-        review_count = db.session.query(func.count(Review.id)).filter_by(doctor_id=doc.user_id).scalar()
+        
+        # Use pre-fetched rating stats instead of calculating per doctor
+        stats = rating_stats.get(doc.user_id, {})
         
         result.append({
             'id': doc.user_id,
             'name': doc.full_name,
             'specialization': doc.specialization.name if doc.specialization else 'General',
             'slots': [slot.time.strftime('%H:%M') for slot in available_slots],
-            'rating': round(avg_rating, 1) if avg_rating else None,
-            'review_count': review_count or 0
+            'rating': stats['avg_rating'],
+            'review_count': stats['review_count']
         })
         
     return jsonify(result), 200
@@ -87,13 +93,22 @@ def get_doctors():
 @bp.route('/book', methods=['POST'])
 @role_required(['Patient'])
 def book_appointment():
+    """Book an appointment for a patient"""
     data = request.get_json()
     patient_id = get_jwt_identity()
     
     try:
-        date_obj = datetime.strptime(data['date'], '%Y-%m-%d').date()
-        time_obj = datetime.strptime(data['time'], '%H:%M').time()
-        doctor_id = data['doctor_id']
+        date_obj, error = validate_date_format(data.get('date'))
+        if error:
+            return jsonify(msg=error), 400
+            
+        time_obj, error = validate_time_format(data.get('time'))
+        if error:
+            return jsonify(msg=error), 400
+        
+        doctor_id = data.get('doctor_id')
+        if not doctor_id:
+            return jsonify(msg="doctor_id is required"), 400
         
         # 1. Find the availability day
         day_avail = DoctorAvailabilityDay.query.filter_by(
@@ -116,24 +131,16 @@ def book_appointment():
         if slot.is_booked:
             return jsonify(msg="Slot already booked."), 409
 
-        # 3. Enforce patient-level spacing: ensure this patient has no other
-        # booked appointment within 15 minutes on the same date (any doctor).
-        spacing_minutes = 15
-        requested_dt = datetime.combine(date_obj, time_obj)
+        # 3. Check for appointment conflicts using helper
+        has_conflict, conflict_msg = check_appointment_conflict(
+            patient_id, date_obj, time_obj, 
+            exclude_statuses=['Cancelled'], 
+            db=db
+        )
+        if has_conflict:
+            return jsonify(msg=conflict_msg), 409
 
-        patient_appts = Appointment.query.filter_by(
-            patient_id=patient_id,
-            date=date_obj,
-            status='Booked'
-        ).all()
-
-        for ap in patient_appts:
-            existing_dt = datetime.combine(ap.date, ap.time)
-            delta = abs((existing_dt - requested_dt).total_seconds())
-            if delta < spacing_minutes * 60:
-                return jsonify(msg=f"You have another appointment within {spacing_minutes} minutes."), 409
-
-        # 4. Check for existing appointment for this doctor/time (handle cancelled re-use)
+        # 4. Check for existing appointment for this doctor/time
         existing_appt = Appointment.query.filter_by(
             doctor_id=doctor_id,
             date=date_obj,
@@ -158,15 +165,19 @@ def book_appointment():
             )
             db.session.add(new_appt)
         
-        # 4. Mark slot as booked
+        # 5. Mark slot as booked
         slot.is_booked = True
         
         db.session.commit()
+        logger.info(f"Patient {patient_id} booked appointment with doctor {doctor_id}")
         return jsonify(msg="Appointment booked successfully"), 201
         
-    except ValueError:
+    except ValueError as e:
+         logger.error(f"Booking validation error: {str(e)}")
          return jsonify(msg="Invalid date or time format."), 400
     except Exception as e:
+        logger.error(f"Booking failed: {str(e)}")
+        db.session.rollback()
         return jsonify(msg=f"Booking failed: {str(e)}"), 500
 
 @bp.route('/appointment', methods=['POST'])
