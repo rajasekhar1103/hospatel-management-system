@@ -260,3 +260,90 @@ def get_all_appointments():
         })
     
     return jsonify(result), 200
+
+# --- ADMIN: SYSTEM HISTORY/AUDIT LOG ---
+
+@bp.route('/history', methods=['GET'])
+@role_required(['Admin'])
+def get_system_history():
+    """
+    Get system activity history for admin monitoring
+    
+    Query params:
+        type: Filter by activity type (user_registration, appointment_booked, etc.)
+        date_from: Filter from date (YYYY-MM-DD)
+        date_to: Filter to date (YYYY-MM-DD)
+    
+    Returns:
+        - 200: List of system activities
+    """
+    try:
+        activity_type = request.args.get('type', '')
+        date_from = request.args.get('date_from', '')
+        date_to = request.args.get('date_to', '')
+        
+        # For now, we'll simulate history data since we don't have an audit log table
+        # In a real application, you'd have an AuditLog model with proper database storage
+        history_data = []
+        
+        # Get recent user registrations
+        recent_users = User.query.order_by(User.created_at.desc()).limit(20).all()
+        for user in recent_users:
+            history_data.append({
+                'id': f'user_reg_{user.id}',
+                'type': 'user_registration',
+                'description': f'New {user.role.lower()} registered: {user.username}',
+                'details': f'User ID: {user.id}, Role: {user.role}',
+                'timestamp': user.created_at.strftime('%Y-%m-%d %H:%M:%S') if hasattr(user, 'created_at') and user.created_at else 'Recent'
+            })
+        
+        # Get recent appointments
+        recent_appointments = db.session.query(Appointment).order_by(Appointment.created_at.desc()).limit(20).all()
+        for appt in recent_appointments:
+            doctor = DoctorProfile.query.get(appt.doctor_id)
+            patient = PatientProfile.query.get(appt.patient_id)
+            
+            if appt.status == 'Booked':
+                activity_type_entry = 'appointment_booked'
+                description = f'Appointment booked: {patient.full_name if patient else "Unknown"} with Dr. {doctor.full_name if doctor else "Unknown"}'
+            elif appt.status == 'Completed':
+                activity_type_entry = 'appointment_completed'
+                description = f'Appointment completed: {patient.full_name if patient else "Unknown"} with Dr. {doctor.full_name if doctor else "Unknown"}'
+            else:
+                continue
+                
+            history_data.append({
+                'id': f'appt_{appt.id}',
+                'type': activity_type_entry,
+                'description': description,
+                'details': f'Date: {appt.date}, Time: {appt.time}',
+                'timestamp': appt.created_at.strftime('%Y-%m-%d %H:%M:%S') if hasattr(appt, 'created_at') and appt.created_at else str(appt.date)
+            })
+        
+        # Get doctor additions (we'll use a simple heuristic since we don't track creation time)
+        recent_doctors = db.session.query(User, DoctorProfile).join(DoctorProfile).filter(User.role == 'Doctor').limit(10).all()
+        for user, doctor in recent_doctors:
+            history_data.append({
+                'id': f'doctor_add_{user.id}',
+                'type': 'doctor_added',
+                'description': f'Doctor added: Dr. {doctor.full_name}',
+                'details': f'Specialization: {doctor.specialization.name if doctor.specialization else "N/A"}',
+                'timestamp': 'Recent addition'
+            })
+        
+        # Apply filters
+        if activity_type:
+            history_data = [h for h in history_data if h['type'] == activity_type]
+        
+        # Sort by timestamp (descending - most recent first)
+        history_data.sort(key=lambda x: x['timestamp'], reverse=True)
+        
+        # Limit results
+        history_data = history_data[:50]
+        
+        logger.info(f"System history requested: type='{activity_type}', results={len(history_data)}")
+        return jsonify(history_data), 200
+        
+    except Exception as e:
+        logger.error(f"History fetch error: {str(e)}")
+        return jsonify(msg="Failed to fetch system history"), 500

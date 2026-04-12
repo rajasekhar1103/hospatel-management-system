@@ -22,6 +22,9 @@
                         <button class="nav-link mb-2 text-start fw-medium" id="appointments-tab" data-bs-toggle="pill" data-bs-target="#appointments" type="button" role="tab" @click="fetchAllAppointments">
                             📅 All Appointments
                         </button>
+                        <button class="nav-link mb-2 text-start fw-medium" id="history-tab" data-bs-toggle="pill" data-bs-target="#history" type="button" role="tab" @click="fetchSystemHistory">
+                            📜 System History
+                        </button>
                         <button class="nav-link mt-4 text-start fw-medium text-danger" @click="logout">
                             🚪 Logout
                         </button>
@@ -227,6 +230,69 @@
             </div>
         </div>
 
+        <!-- History Tab -->
+        <div class="tab-pane fade" id="history" role="tabpanel">
+            <div class="glass-panel p-4">
+                <h4 class="mb-4 fw-bold text-primary">System Activity History</h4>
+                
+                <div class="mb-4">
+                    <div class="row g-3">
+                        <div class="col-md-3">
+                            <label class="form-label text-muted small fw-bold">FILTER BY TYPE</label>
+                            <select class="form-select border-0 bg-light shadow-sm" v-model="historyFilter">
+                                <option value="">All Activities</option>
+                                <option value="user_registration">User Registrations</option>
+                                <option value="appointment_booked">Appointments Booked</option>
+                                <option value="appointment_completed">Appointments Completed</option>
+                                <option value="user_blocked">Users Blocked/Unblocked</option>
+                                <option value="doctor_added">Doctors Added</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label text-muted small fw-bold">DATE FROM</label>
+                            <input type="date" class="form-control border-0 bg-light shadow-sm" v-model="historyDateFrom">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label text-muted small fw-bold">DATE TO</label>
+                            <input type="date" class="form-control border-0 bg-light shadow-sm" v-model="historyDateTo">
+                        </div>
+                        <div class="col-md-3 d-flex align-items-end">
+                            <button class="btn btn-primary w-100 shadow-sm" @click="fetchSystemHistory">Filter</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-if="systemHistory.length > 0" class="timeline">
+                    <div v-for="activity in systemHistory" :key="activity.id" class="timeline-item mb-4">
+                        <div class="timeline-marker bg-primary"></div>
+                        <div class="timeline-content card border-0 shadow-sm">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-start mb-2">
+                                    <div class="d-flex align-items-center">
+                                        <span class="badge bg-light text-dark border me-2">{{ activity.type }}</span>
+                                        <small class="text-muted">{{ activity.timestamp }}</small>
+                                    </div>
+                                    <span :class="getActivityIcon(activity.type)" class="fs-5"></span>
+                                </div>
+                                <p class="mb-1 fw-medium">{{ activity.description }}</p>
+                                <small class="text-muted">{{ activity.details }}</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-else-if="historyLoaded" class="text-center py-5 text-muted">
+                    <div class="display-4 mb-3">📜</div>
+                    <p>No system activity found for the selected filters.</p>
+                </div>
+
+                <div v-else class="text-center py-5 text-muted opacity-50">
+                    <div class="display-4 mb-3">🔄</div>
+                    <p>Loading system history...</p>
+                </div>
+            </div>
+        </div>
+
         <!-- Edit Doctor Modal -->
         <div class="modal fade" id="doctorEditModal" tabindex="-1" ref="doctorEditModal">
             <div class="modal-dialog modal-dialog-centered">
@@ -287,6 +353,13 @@ export default {
             searchResults: [],
             hasSearched: false,
             allAppointments: [],
+            
+            // History data
+            systemHistory: [],
+            historyFilter: '',
+            historyDateFrom: '',
+            historyDateTo: '',
+            historyLoaded: false,
         };
     },
     mounted() {
@@ -475,6 +548,42 @@ export default {
                 console.error('Error updating user:', error);
             }
         },
+        // --- HISTORY METHODS ---
+        async fetchSystemHistory() {
+            try {
+                this.historyLoaded = false;
+                let url = '/api/admin/history';
+                const params = new URLSearchParams();
+                
+                if (this.historyFilter) params.append('type', this.historyFilter);
+                if (this.historyDateFrom) params.append('date_from', this.historyDateFrom);
+                if (this.historyDateTo) params.append('date_to', this.historyDateTo);
+                
+                if (params.toString()) url += '?' + params.toString();
+
+                const response = await fetch(url, { headers: { 'Authorization': `Bearer ${getToken()}` } });
+                if (response.ok) {
+                    this.systemHistory = await response.json();
+                } else {
+                    this.systemHistory = [];
+                }
+            } catch (error) {
+                console.error('Error fetching system history:', error);
+                this.systemHistory = [];
+            } finally {
+                this.historyLoaded = true;
+            }
+        },
+        getActivityIcon(type) {
+            const icons = {
+                'user_registration': '👤',
+                'appointment_booked': '📅',
+                'appointment_completed': '✅',
+                'user_blocked': '🚫',
+                'doctor_added': '👨‍⚕️'
+            };
+            return icons[type] || '📝';
+        },
     },
 };
 </script>
@@ -520,5 +629,41 @@ export default {
     background-color: var(--primary-color);
     color: white;
     box-shadow: var(--shadow-md);
+}
+
+/* Timeline Styles */
+.timeline {
+    position: relative;
+    padding-left: 30px;
+}
+
+.timeline::before {
+    content: '';
+    position: absolute;
+    left: 15px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background-color: #e9ecef;
+}
+
+.timeline-item {
+    position: relative;
+    margin-left: 30px;
+}
+
+.timeline-marker {
+    position: absolute;
+    left: -22px;
+    top: 20px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 3px solid white;
+    box-shadow: 0 0 0 2px #e9ecef;
+}
+
+.timeline-content {
+    margin-left: 20px;
 }
 </style>
